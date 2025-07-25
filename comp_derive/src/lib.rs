@@ -41,20 +41,28 @@ impl Parse for Comp {
 impl ToTokens for Comp {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         let Mapping(mapping) = &self.mapping;
-        // TODO: Implement the list comprehension for nested for-if clauses
-        let for_if_clauses = &self.for_if_clauses;
-        
-        let ForIfClause{
-            sequence,
-            pattern,
-            conditions,
-        } = &for_if_clauses[0];
-        
-        tokens.extend(quote! {
-            ::core::iter::IntoIterator::into_iter(#sequence).filter_map(|#pattern| {
-                (true #(&& (#conditions))*).then(|| #mapping)
-            })
-        });
+
+        fn build_iter(mapping: TokenStream2, clauses: &[ForIfClause]) -> TokenStream2 {
+            if let Some((first, rest)) = clauses.split_first() {
+                let ForIfClause {
+                    pattern,
+                    sequence,
+                    conditions,
+                } = first;
+                let cond = quote! { (true #(&& (#conditions))* ) };
+                let inner = build_iter(mapping, rest);
+                quote! {
+                    ::core::iter::IntoIterator::into_iter(#sequence).flat_map(move |#pattern| {
+                        #cond.then(|| { #inner }).into_iter().flatten()
+                    })
+                }
+            } else {
+                quote! { ::core::iter::once(#mapping) }
+            }
+        }
+
+        let iter = build_iter(quote! { #mapping }, &self.for_if_clauses);
+        tokens.extend(iter);
     }
 }
 
